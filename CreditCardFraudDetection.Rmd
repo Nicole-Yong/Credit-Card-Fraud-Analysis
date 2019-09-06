@@ -1,0 +1,480 @@
+---
+title: "edX HarvardX: PH125.8x | Capstone Project"
+author: "Nicole Yong"
+date: "9/6/2019"
+output: pdf_document
+---
+
+# INTRODUCTION
+This Credit Card Fraud Detection project is created to fulfil the coursework requirements of the capstone module in edX HarvardX: PH125.9x (Data Science Professional Certificate).
+
+## Credit Card Fraud Detection Dataset
+This dataset contains transactions made by credit cards over two days in September 2013 by European cardholders. The dataset is highly unbalanced, the positive class (frauds) account for 0.172% of all transactions.
+
+Variables: 
+
+* V1, V2, ... V28: principal components obtained with PCA
+* 'Time': the seconds elapsed between each transaction and the first transaction in the dataset
+* 'Amount': the transaction amount
+* 'Class': the response variable; value 1 in the case of fraud and 0 otherwise
+
+The dataset can be found on Kaggle in the following link: 
+
+* https://www.kaggle.com/mlg-ulb/creditcardfraud/
+
+## Goal of Credit Card Fraud Detection Project
+The goal of the credit card fraud detection project is to identify fraudulent credit card transactions.
+
+## Measurement used: Area Under the Precision-Recall Curve
+As the dataset is highly imbalanced, the accuracy will be measured using the Area Under the Precision-Recall Curve (AUPRC). The AUPRC is a single number summary of the information in the precision-recall (PR) curve.
+
+## Key Steps Performed
+1. Importing data
+* Downloading data from the link
+* Importing data into RStudio
+2. Data visualization
+* Explore variables in the dataset
+* Draw insights from variables
+3. Data preprocessing
+* Convert target variable into factor
+* Rescale variables as variables with higher values may dominate algorithms
+4. Spliting data into train and test dataset
+* Baseline train and test dataset without additional processing
+* Oversampled train set: Majority Weighted Minority Oversampling Technique (MWMOTE) adjusted train dataset
+* Undersampled train set: Synthetic Minority Over-sampling Technique (SMOTE) adjusted train dataset
+5. Model selection and training
+* Boosted classification trees
+
+\pagebreak
+
+# METHODS & ANALYSIS OF CREDIT CARD FRAUD DETECTION DATASET
+
+## Load Libraries
+* Load the Required Libraries
+* Install Missing Packages Automatically
+```{r, echo=FALSE, warning=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(tidyr)) install.packages("tidyr", repos = "http://cran.us.r-project.org")
+if(!require(ggthemes)) install.packages("ggthemes", repos = "http://cran.us.r-project.org")
+if(!require(readr)) install.packages("readr", repos = "http://cran.us.r-project.org")
+if(!require(PRROC)) install.packages("PRROC", repos = "http://cran.us.r-project.org")
+if(!require(xgboost)) install.packages("xgboost", repos = "http://cran.us.r-project.org")
+if(!require(Matrix)) install.packages("Matrix", repos = "http://cran.us.r-project.org")
+if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org")
+if(!require(class)) install.packages("class", repos = "http://cran.us.r-project.org")
+if(!require(imbalance)) install.packages("imbalance", repos = "http://cran.us.r-project.org")
+if(!require(smotefamily)) install.packages("smotefamily", repos = "http://cran.us.r-project.org")
+if(!require(ROSE)) install.packages("ROSE", repos = "http://cran.us.r-project.org")
+```
+
+\pagebreak
+
+## Print Session Information
+To help with code reproducibility, print version information about R, the OS and attached or loaded packages.
+```{r, echo=FALSE}
+sessionInfo()
+```
+
+\pagebreak
+
+## STEP 1: DATA GATHERING & LOADING THE DATASET
+### Load Credit Card Fraud Detection Dataset
+```{r, warning=FALSE, message=FALSE}
+data <- read_csv("./input/creditcard.csv")
+```
+
+Sample of dataset
+```{r, echo=FALSE}
+head(data)
+```
+
+\pagebreak
+
+## STEP 2: DATA EXPLORATION & VISUALIZATION
+### Part 2.1: Inspect the dataset
+
+Summary of dataset
+```{r, echo=FALSE}
+summary(data)
+```
+
+Glimpse the dataset
+```{r, echo=FALSE}
+glimpse(data)
+```
+
+Variable names
+```{r, echo=FALSE}
+names(data)
+```
+
+Check dimension (number of rows and columns)
+```{r}
+dim(data)
+```
+
+### Insights from Part 2.1
+1. No missing data from summary table
+2. All variables are masked, except 'Amount', 'Time' and 'Class'
+
+\pagebreak
+
+### Part 2.2: Inspect target variable - 'Class'
+```{r}
+table(data$Class)
+```
+
+```{r, echo=FALSE, fig.align='center', fig.width=5, fig.height=3, message=FALSE, warning=FALSE}
+data %>%
+  group_by(Class) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = n / sum(n)) %>%
+  ggplot(aes(x= Class, y = Freq, fill= Class)) + 
+  geom_bar(stat = "identity", fill="#69b3a2", color="#e9ecef") + 
+  geom_text(aes(x = Class, y = Freq, label = round(Freq, digits = 4))) + 
+  ggtitle("Distribution of Target ('Class') Variable") + 
+  scale_x_continuous(breaks = c(0,1), limits=c(-1,2))
+```
+
+Convert target variable ('Class') into factor
+```{r}
+data$Class <- factor(ifelse(data$Class == 0, "zero", "one")) 
+```
+
+### Insights from Part 2.2
+1. Highly imbalanced dataset
+
+\pagebreak
+
+### Part 2.3: Inspect 'Time' variable
+Convert seconds to hours of the day
+```{r}
+data$hour <- (data$Time/3600) %% 24
+```
+
+```{r, echo=FALSE, fig.align='center', fig.width=5, fig.height=6, message=FALSE, warning=FALSE}
+time_nofraud <- data %>%
+  filter(Class == "zero") %>%
+  ggplot(aes(x = hour)) + 
+  geom_density(fill="#69b3a2", color="#e9ecef") +
+  ggtitle("Distribution of 'Time' Variable - Non-Fraud") + 
+  scale_x_continuous(breaks = c(0, 4, 8, 12, 16, 20, 24))
+
+time_fraud <- data %>%
+  filter(Class == "one") %>%
+  ggplot(aes(x = hour)) + 
+  geom_density(fill="#69b3a2", color="#e9ecef") +
+  ggtitle("Distribution of 'Time' Variable - Fraud") +
+  scale_x_continuous(breaks = c(0, 4, 8, 12, 16, 20, 24))
+
+grid.arrange(time_nofraud, time_fraud)
+```
+
+### Insights from Part 2.3
+1. Non-fraud credit card transactions started to pick up from 08:00AM, maintained traction, and fell off at roughly 22:00PM
+2. This would be in line with how a normal person would be using his/her credit card; starting from breakfast hours, throughout the day, and tapering off when the day ends
+3. Fraudulent credit card transactions had more activity during 00:00 midnight to 08:00AM
+4. This could be because credit card transactions made during these hours, when the real owners are presumably asleep, are less likely to be found out via real-time bank alerts etc.
+5. This could also suggest fraudulent credit card transactions are made in a different time zone
+
+\pagebreak
+
+### Part 2.4: Inspect 'Amount' variable
+```{r, echo=FALSE, fig.align='center', fig.width=5, fig.height=6, message=FALSE, warning=FALSE}
+amt<- data %>% ggplot(aes(x = Amount)) + 
+  geom_histogram(fill="#69b3a2", color="#e9ecef") + 
+  ggtitle("Distribution of 'Amount' Variable")
+
+amt_log <- data %>% ggplot(aes(x = log(Amount))) + 
+  geom_histogram(fill="#69b3a2", color="#e9ecef") + 
+  ggtitle("Distribution of 'Amount' Variable (log)")
+
+grid.arrange(amt, amt_log)
+```
+
+* 'Amount' variable cannot be seen properly without log transformation
+* Hence the log transformed 'Amount' variable will be used in the charts below
+
+```{r, echo=FALSE, fig.align='center', fig.width=5, fig.height=6, message=FALSE, warning=FALSE}
+amt_nofraud <- data %>%
+  filter(Class == "zero") %>%
+  ggplot(aes(x = log(Amount))) + 
+  geom_density(fill="#69b3a2", color="#e9ecef") +
+  ggtitle("Distribution of 'Amount' Variable - Non-Fraud") + 
+  scale_x_continuous(breaks = c(-5, -2.5, 0, 2.5, 5, 7.5, 10), limits=c(-5, 10))
+
+amt_fraud <- data %>%
+  filter(Class == "one") %>%
+  ggplot(aes(x = log(Amount))) + 
+  geom_density(fill="#69b3a2", color="#e9ecef") +
+  ggtitle("Distribution of 'Amount' Variable - Fraud") + 
+  scale_x_continuous(breaks = c(-5, -2.5, 0, 2.5, 5, 7.5, 10), limits=c(-5, 10))
+
+grid.arrange(amt_nofraud, amt_fraud)
+```
+
+### Insights from Part 2.4
+1. The summary table shows the min. for 'Amount' variable is 0.00, which seems counter-intuitive to a credit card transaction
+2. Potentially, a 0.00 amount could be used to verify if the credit card is a valid one
+3. Fraudulent transactions have amounts smoothened out with less variability in the distribution
+4. This may suggest certain 'favored' amounts that credit card fraudsters charge to the credit cards
+4. This is unlike non-fraudulent transactions, where credit card transactions can be for a wide range of amounts since transactions for goods and services are unlimited to certain amounts
+
+\pagebreak
+
+## STEP 3: DATA PREPROCESSING
+
+### Part 3.1: Rescale variables to be in the range 0 to 1
+* Variables with higher values may dominate computations and skew the model performance
+* Hence, normalize data to work with different variables that are in different scales
+
+```{r, echo=FALSE, warning=FALSE}
+predictors <- select(data, -Class)
+cbind(melt(apply(predictors, 2, min), value.name = "min"), 
+      melt(apply(predictors, 2, max), value.name = "max"))
+
+rescale <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+predictors_rescaled <- as.data.frame(apply(predictors, 2, rescale))
+cbind(melt(apply(predictors_rescaled, 2, min), value.name = "min_after_rescaling"), 
+      melt(apply(predictors_rescaled, 2, max), value.name = "max_after_rescaling"))
+
+data <- cbind(Class = data$Class, predictors_rescaled)
+```
+
+\pagebreak
+
+## STEP 4: SPLIT DATASET INTO TRAIN & TEST SET
+Set seed
+```{r}
+set.seed(1)
+```
+
+### Part 4.1: Baseline dataset
+Train data: 70%; Test data: 30%
+```{r, warning=FALSE}
+index_train <- createDataPartition(data$Class, p=0.7, list=FALSE)
+
+baseline_train <- data[index_train, ]
+test <- data[-index_train, ]
+
+baseline_train$Class <- factor(baseline_train$Class)
+```
+
+\pagebreak
+
+### Part 4.2: MWMOTE adjusted dataset
+* MWMOTE: Majority Weighted Minority Oversampling Technique
+* Oversampling helps to balance class distribution by duplicating minority class instances  
+
+Generate more noisy instances out of dataset
+```{r, warning=FALSE, include=TRUE}
+mwmote_train_gen <- mwmote(as.data.frame(baseline_train), numInstances=100000)
+table(mwmote_train_gen$Class)
+```
+
+Bind the train dataset and the newly generated instances
+```{r, warning=FALSE}
+mwmote_train <- rbind(baseline_train, mwmote_train_gen)
+```
+
+Compare 'Class' variable in the baseline dataset and MWMOTE adjusted dataset
+```{r, warning=FALSE}
+table(baseline_train$Class)
+table(mwmote_train$Class)
+
+mwmote_train$Class <- factor(mwmote_train$Class)
+```
+
+### Insights from Part 4.2
+1. MWMOTE adjusted dataset is a more balanced dataset
+
+\pagebreak
+
+### Part 4.3: SMOTE adjusted dataset
+* Undersample instances of the majority class so classifiers are not biased toward one class  
+
+```{r, warning=FALSE}
+set.seed(1)
+smote_train_gen1 <- SMOTE(X = baseline_train[, -1], target = baseline_train$Class, dup_size = 4)
+smote_train_gen2 <- smote_train_gen1$data %>% rename(Class = class)
+```
+
+Undersample dataset until majority class size matches
+```{r, warning=FALSE}
+smote_train_gen3 <- ovun.sample(Class ~ .,
+                        data = smote_train_gen2,
+                        method = "under",
+                        N = 2 * sum(smote_train_gen2$Class == "one"))
+
+smote_train <- smote_train_gen3$data
+```
+
+Compare 'Class' variable in the baseline dataset and SMOTE adjusted dataset
+```{r, warning=FALSE}
+table(baseline_train$Class)
+table(smote_train$Class)
+
+smote_train$Class <- factor(smote_train$Class)
+```
+### Insights from Part 4.3
+1. SMOTE adjusted dataset is a more balanced dataset
+
+\pagebreak
+
+## STEP 5: MODEL SELECTION & TRAINING
+* Evaluation Metric: Area Under the Precision-Recall Curve (AUPRC)
+
+**XGBoost: xgbTree Method** 
+
+* Build a series of trees where each tree is trained to attempt to correct the mistakes of the previous tree in the series
+* To create a model that makes fewer and fewer mistakes as more trees are added
+* Making predictions with gradient boosted tree models is faster
+
+### Part 5.1: XGBoost model for baseline dataset
+```{r, warning=FALSE, echo=FALSE}
+xgb_baseline_train <- sparse.model.matrix(Class ~ . -1, data = baseline_train)
+xgb_mwmote_train <- sparse.model.matrix(Class ~ . -1, data = mwmote_train)
+xgb_smote_train <- sparse.model.matrix(Class ~ . -1, data = smote_train)
+xgb_test <- sparse.model.matrix(Class ~ . -1, data = test)
+
+ctrl_xgb <- trainControl(method = "cv",
+                         number = 3,
+                         summaryFunction=prSummary,
+                         classProbs=TRUE,
+                         allowParallel = TRUE)
+
+set.seed(1)
+xgb_baseline_train_benchmark <- train(x = xgb_baseline_train,
+                             y = baseline_train$Class,
+                             method = "xgbTree",
+                             metric = "AUC",
+                             trControl = ctrl_xgb)
+
+
+xgb_baseline_train_pred <- predict(xgb_baseline_train_benchmark, xgb_test, type = "prob")
+
+xgb_baseline_train_scores <- data.frame(event_prob = xgb_baseline_train_pred$one, labels = test$Class)
+
+xgb_baseline_train_auprc <- pr.curve(scores.class0 = xgb_baseline_train_scores[xgb_baseline_train_scores$labels == "one", ]$event_prob,
+                                     scores.class1 = xgb_baseline_train_scores[xgb_baseline_train_scores$labels == "zero", ]$event_prob,
+                                     curve=T)
+
+xgb_baseline_train_benchmark$bestTune 
+
+paste("Area Under the Precision-Recall Curve:", round(xgb_baseline_train_auprc$auc.integral, 3))
+```
+
+```{r, echo=FALSE}
+baseline_AUPRC <- round(xgb_baseline_train_auprc$auc.integral, 3)
+```
+
+Add baseline model results to a table for later comparison
+```{r, warning=FALSE, echo=FALSE}
+XGB_results <- data_frame(Model = "Baseline XGBoost", AUPRC = round(xgb_baseline_train_auprc$auc.integral, 3))
+XGB_results %>% knitr::kable()
+```
+
+\pagebreak
+
+### Part 5.2: XGBoost model for MWMOTE adjusted dataset
+```{r, warning=FALSE, echo=FALSE}
+set.seed(1)
+xgb_mwmote_train_benchmark <- train(x = xgb_mwmote_train,
+                                    y = mwmote_train$Class,
+                                    method = "xgbTree",
+                                    metric = "AUC",
+                                    trControl = ctrl_xgb)
+
+
+xgb_mwmote_train_pred <- predict(xgb_mwmote_train_benchmark, xgb_test, type = "prob")
+
+xgb_mwmote_train_scores <- data.frame(event_prob = xgb_mwmote_train_pred$one, labels = test$Class)
+
+xgb_mwmote_train_auprc <- pr.curve(scores.class0 = xgb_mwmote_train_scores[xgb_mwmote_train_scores$labels == "one", ]$event_prob, 
+                                   scores.class1 = xgb_mwmote_train_scores[xgb_mwmote_train_scores$labels == "zero", ]$event_prob, 
+                                   curve=T)
+
+xgb_mwmote_train_benchmark$bestTune 
+
+paste("Area Under the Precision-Recall Curve:", round(xgb_mwmote_train_auprc$auc.integral, 3))
+```
+
+```{r, echo=FALSE}
+MWMOTE_adjusted_AUPRC <- round(xgb_mwmote_train_auprc$auc.integral, 3)
+```
+
+Add baseline model results to a table for later comparison
+```{r, echo=FALSE}
+XGB_results <- bind_rows(XGB_results,
+                         data_frame(Model="MWMOTE Adjusted XGBoost",  
+                                    AUPRC = round(xgb_mwmote_train_auprc$auc.integral, 3)))
+XGB_results %>% knitr::kable()
+```
+
+\pagebreak
+
+### Part 5.3: XGBoost model for SMOTE adjusted dataset
+```{r, warning=FALSE, echo=FALSE}
+set.seed(1)
+xgb_smote_train_benchmark <- train(x = xgb_smote_train,
+                                      y = smote_train$Class,
+                                      method = "xgbTree",
+                                      metric = "AUC",
+                                      trControl = ctrl_xgb)
+
+
+xgb_smote_train_pred <- predict(xgb_smote_train_benchmark, xgb_test, type = "prob")
+
+xgb_smote_train_scores <- data.frame(event_prob = xgb_smote_train_pred$one, labels = test$Class)
+
+xgb_smote_train_auprc <- pr.curve(scores.class0 = xgb_smote_train_scores[xgb_smote_train_scores$labels == "one", ]$event_prob,
+                                     scores.class1 = xgb_smote_train_scores[xgb_smote_train_scores$labels == "zero", ]$event_prob,
+                                     curve=T)
+
+xgb_smote_train_benchmark$bestTune 
+
+paste("Area Under the Precision-Recall Curve:", round(xgb_smote_train_auprc$auc.integral, 3))
+```
+
+```{r, echo=FALSE}
+SMOTE_adjusted_AUPRC <- round(xgb_smote_train_auprc$auc.integral, 3)
+```
+
+Add baseline model results to a table for later comparison
+```{r, echo=FALSE}
+XGB_results <- bind_rows(XGB_results,
+                         data_frame(Model="SMOTE Adjusted XGBoost",  
+                                    AUPRC = round(xgb_smote_train_auprc$auc.integral, 3)))
+XGB_results %>% knitr::kable()
+```
+
+\pagebreak
+
+# RESULTS
+## Modeling Results & Model Performance
+To recap, the goal of this project is to identify fraudulent credit card transactions. 
+As the dataset is highly imbalanced, the accuracy will be measured using the Area Under the Precision-Recall Curve (AUPRC).  
+The modeling results and model performance shows that the baseline training dataset delivered better model performance. In summary, the highest AUPRC was **`r baseline_AUPRC`**, achieved using **XGBoost** with **xgbTree** method.  
+
+This reflects the challenges in dealing with a highly imbalanced dataset. An examination of the XGBoost model results shows that the *max_depth* (which controls the depth of the tree) using the baseline train dataset was **2**, while using the MWMOTE adjusted and SMOTE adjusted train datasets returned a *max_depth* of **3**. This could potentially explain why the baseline trained model scored the highest AUPRC. It is possible that both models trained with the adjusted datasets were overfitting.
+
+# CONCLUSION
+## Brief Summary
+In summary, this report explained the steps in creating a machine learning algorithm to detect fraudulent credit card transactions from the Credit Card Fraud Detection dataset (from Kaggle). This report also dealt with a highly imbalanced dataset and included trying out various preprocessing steps for such datasets.
+The boosting method from the **XGBoost** package is used for this classification problem, with Area under the Precision-Recall curve of **`r baseline_AUPRC`**.
+
+## Limitations and Future Work
+For the purpose of this project, the Credit Card Fraud Detection dataset provided by Kaggle had most of the variables masked via PCA. As such, while the algorithms may accurately detect a fraudulent credit card transaction, it does not provide a rational explanation as to why a transaction was categorized as fraudulent. 
+For future work, with unmasked variables, we may use the machine learning algorithm to better understand which are the variables that would lead to a transaction being classified as fraudulent, and may further work towards this to reduce credit card frauds.
+
+## Github
+The following link to the GitHub repository contains the reports in PDF format, Rmd format and R script: 
+https://github.com/Nicole-Yong/Credit-Card-Fraud-Analysis
